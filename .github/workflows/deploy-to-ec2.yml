@@ -61,29 +61,36 @@ jobs:
           port: ${{ secrets.SSH_PORT }}
           script: |
             set -e
-
-            echo "---- [1] Preparing target directory ----"
+            echo "---- [1] Prepare target dir ----"
             mkdir -p ${{ secrets.EC2_TARGET_DIR }}
 
-            echo "---- [2] Cleaning old temp folder ----"
-            rm -rf /tmp/release
+            echo "---- [2] Clean old temp folder ----"
+            rm -rf /tmp/release || true
 
-            echo "---- [3] Extracting release ----"
+            echo "---- [3] Extract release ----"
             unzip -o ~/release.zip -d /tmp/release
 
-            echo "---- [4] Cleaning old node_modules ----"
+            echo "---- [4] Remove old node_modules ----"
             sudo rm -rf ${{ secrets.EC2_TARGET_DIR }}/node_modules || true
 
-            echo "---- [5] Syncing files ----"
-            rsync -av --delete /tmp/release/ ${{ secrets.EC2_TARGET_DIR }}/ || true
+            echo "---- [5] Rsync files as root, chown to deploy:deploy ----"
+            sudo rsync -av --delete \
+              --chown=deploy:deploy \
+              --chmod=Dg+rx,Du+rwx,Fu+rw,Fg+r \
+              /tmp/release/ ${{ secrets.EC2_TARGET_DIR }}/
 
-            echo "---- [6] Installing production dependencies ----"
-            cd ${{ secrets.EC2_TARGET_DIR }}
-            npm ci --omit=dev --no-audit --no-fund
+            echo "---- [6] Fix permissions ----"
+            sudo chown -R deploy:deploy ${{ secrets.EC2_TARGET_DIR }}
+            sudo find ${{ secrets.EC2_TARGET_DIR }} -type d -exec chmod 755 {} \; || true
+            sudo find ${{ secrets.EC2_TARGET_DIR }} -type f -exec chmod 644 {} \; || true
 
-            echo "---- [7] Restarting Node.js service ----"
+            echo "---- [7] Install production dependencies as deploy ----"
+            sudo -u deploy -H bash -lc "cd ${{ secrets.EC2_TARGET_DIR }} && npm ci --omit=dev --no-audit --no-fund"
+
+            echo "---- [8] Restart Node.js service ----"
             sudo systemctl daemon-reload || true
             sudo systemctl restart my-node-app.service
             sudo systemctl status my-node-app.service --no-pager
 
             echo "✅ Deployment complete!"
+
