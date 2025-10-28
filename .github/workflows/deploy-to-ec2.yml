@@ -40,13 +40,13 @@ jobs:
 
       - name: Upload release to server via scp
         run: |
-          scp -o StrictHostKeyChecking=no -i ./deploy_key -P ${{ secrets.SSH_PORT }} release.zip ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/tmp/release.zip
-          
+          scp -o StrictHostKeyChecking=no -i ./deploy_key -P ${{ secrets.SSH_PORT }} release.zip ec2-user@${{ secrets.EC2_HOST }}:/tmp/release.zip
+
       - name: Deploy on the remote server (unzip, rsync, npm install, restart service)
         uses: appleboy/ssh-action@v0.1.8
         with:
           host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}       # use ec2-user here
+          username: ec2-user
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.SSH_PORT }}
           script: |
@@ -61,7 +61,6 @@ jobs:
             cd ${{ secrets.EC2_TARGET_DIR }}
             npm ci --production
 
-            # restart systemd service (ec2-user has sudo)
             sudo systemctl daemon-reload || true
             sudo systemctl restart my-node-app.service
             sudo systemctl status my-node-app.service --no-pager
