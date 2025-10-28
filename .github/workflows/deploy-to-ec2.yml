@@ -65,17 +65,23 @@ jobs:
             echo "---- [1] Preparing target directory ----"
             mkdir -p ${{ secrets.EC2_TARGET_DIR }}
 
-            echo "---- [2] Extracting release ----"
+            echo "---- [2] Cleaning old temp folder ----"
+            rm -rf /tmp/release
+
+            echo "---- [3] Extracting release ----"
             unzip -o ~/release.zip -d /tmp/release
 
-            echo "---- [3] Syncing files ----"
-            rsync -av --delete /tmp/release/ ${{ secrets.EC2_TARGET_DIR }}/
+            echo "---- [4] Cleaning old node_modules ----"
+            sudo rm -rf ${{ secrets.EC2_TARGET_DIR }}/node_modules || true
 
-            echo "---- [4] Installing production dependencies ----"
+            echo "---- [5] Syncing files ----"
+            rsync -av --delete /tmp/release/ ${{ secrets.EC2_TARGET_DIR }}/ || true
+
+            echo "---- [6] Installing production dependencies ----"
             cd ${{ secrets.EC2_TARGET_DIR }}
             npm ci --omit=dev --no-audit --no-fund
 
-            echo "---- [5] Restarting Node.js service ----"
+            echo "---- [7] Restarting Node.js service ----"
             sudo systemctl daemon-reload || true
             sudo systemctl restart my-node-app.service
             sudo systemctl status my-node-app.service --no-pager
