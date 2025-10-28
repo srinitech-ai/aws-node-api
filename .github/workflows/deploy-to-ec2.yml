@@ -51,20 +51,26 @@ jobs:
           port: ${{ secrets.SSH_PORT }}
           script: |
             set -e
+            # ensure target dir exists and is writable by deploy
             mkdir -p ${{ secrets.EC2_TARGET_DIR }}
-            # ensure unzip and rsync exist
-            command -v unzip >/dev/null 2>&1 || sudo dnf install -y unzip
-            command -v rsync >/dev/null 2>&1 || sudo dnf install -y rsync
-            # unpack release and sync to target dir
+            # ensure unzip and rsync exist (sudo used only if necessary to install packages;
+            # this should be a one-time server setup step — see below)
+            command -v unzip >/dev/null 2>&1 || (echo "unzip not found; please install on server" && exit 1)
+            command -v rsync >/dev/null 2>&1 || (echo "rsync not found; please install on server" && exit 1)
+
+            # unpack and sync
             unzip -o /tmp/release.zip -d /tmp/release
             rsync -av --delete /tmp/release/ ${{ secrets.EC2_TARGET_DIR }}/
+
+            # enter app dir and install production deps (runs as deploy user)
             cd ${{ secrets.EC2_TARGET_DIR }}
-            # install production dependencies as deploy user
-            sudo -u deploy npm ci --production
-            # reload/start via pm2 using ecosystem file if present
+            npm ci --production
+
+            # reload/start via pm2 (runs as deploy user; pm2 must be available in PATH)
             if [ -f ecosystem.config.js ]; then
-              sudo pm2 reload ecosystem.config.js --env production || sudo pm2 start ecosystem.config.js --env production
+              pm2 reload ecosystem.config.js --env production || pm2 start ecosystem.config.js --env production
             else
-              sudo pm2 describe my-node-app && sudo pm2 restart my-node-app || sudo pm2 start app.js --name my-node-app
+              pm2 describe my-node-app && pm2 restart my-node-app || pm2 start app.js --name my-node-app
             fi
-            sudo pm2 save
+
+            pm2 save
