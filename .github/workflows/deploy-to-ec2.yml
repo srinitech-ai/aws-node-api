@@ -1,4 +1,4 @@
-name: CI -> Deploy to EC2
+name: CI → Deploy to EC2
 
 on:
   push:
@@ -12,37 +12,47 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # 1️⃣ Checkout repository
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Setup Node
+      # 2️⃣ Setup Node.js
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20.19.0'
 
+      # 3️⃣ Install dependencies
       - name: Install dependencies
         run: npm ci
 
-      # Remove or comment this section if no build step
-      # - name: Build
+      # 4️⃣ (Optional) Build step – uncomment if you have a build
+      # - name: Build app
       #   run: npm run build
 
+      # 5️⃣ Archive the repository for deploy
       - name: Archive repo for deploy
         run: |
-          zip -r release.zip . -x "node_modules/***" ".git/***" ".github/***" "dist/***" "README.md"
+          zip -r release.zip . \
+            -x "node_modules/***" ".git/***" ".github/***" "dist/***" "README.md"
 
+      # 6️⃣ Prepare SSH key safely
       - name: Prepare private key
         run: |
-          echo "$SSH_PRIVATE_KEY" > ./deploy_key
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ./deploy_key
           chmod 600 ./deploy_key
         env:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
 
-      - name: Upload release to server via scp
+      # 7️⃣ Upload the release archive to EC2 (user’s home directory)
+      - name: Upload release to server via SCP
         run: |
-          scp -o StrictHostKeyChecking=no -i ./deploy_key -P ${{ secrets.SSH_PORT }} release.zip ec2-user@${{ secrets.EC2_HOST }}:/tmp/release.zip
+          scp -o StrictHostKeyChecking=no -i ./deploy_key \
+              -P ${{ secrets.SSH_PORT }} \
+              release.zip ec2-user@${{ secrets.EC2_HOST }}:~/release.zip
 
-      - name: Deploy on the remote server (unzip, rsync, npm install, restart service)
+      # 8️⃣ Deploy on the remote EC2 instance
+      - name: Deploy on remote EC2 (unzip, rsync, npm install, restart service)
         uses: appleboy/ssh-action@v0.1.8
         with:
           host: ${{ secrets.EC2_HOST }}
@@ -51,16 +61,23 @@ jobs:
           port: ${{ secrets.SSH_PORT }}
           script: |
             set -e
-            mkdir -p ${{ secrets.EC2_TARGET_DIR }}
-            command -v unzip >/dev/null 2>&1 || (echo "unzip not found; please install on server" && exit 1)
-            command -v rsync >/dev/null 2>&1 || (echo "rsync not found; please install on server" && exit 1)
 
-            unzip -o /tmp/release.zip -d /tmp/release
+            echo "---- [1] Preparing target directory ----"
+            mkdir -p ${{ secrets.EC2_TARGET_DIR }}
+
+            echo "---- [2] Extracting release ----"
+            unzip -o ~/release.zip -d /tmp/release
+
+            echo "---- [3] Syncing files ----"
             rsync -av --delete /tmp/release/ ${{ secrets.EC2_TARGET_DIR }}/
 
+            echo "---- [4] Installing production dependencies ----"
             cd ${{ secrets.EC2_TARGET_DIR }}
-            npm ci --production
+            npm ci --omit=dev --no-audit --no-fund
 
+            echo "---- [5] Restarting Node.js service ----"
             sudo systemctl daemon-reload || true
             sudo systemctl restart my-node-app.service
             sudo systemctl status my-node-app.service --no-pager
+
+            echo "✅ Deployment complete!"
